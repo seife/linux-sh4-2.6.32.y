@@ -284,17 +284,32 @@ int usbnet_change_mtu (struct net_device *net, int new_mtu)
 }
 EXPORT_SYMBOL_GPL(usbnet_change_mtu);
 
+/* The caller must hold list->lock */
+static void __usbnet_queue_skb(struct sk_buff_head *list,
+			struct sk_buff *newsk, enum skb_state state)
+{
+	struct skb_data *entry = (struct skb_data *) newsk->cb;
+
+	__skb_queue_tail(list, newsk);
+	entry->state = state;
+}
+
 /*-------------------------------------------------------------------------*/
 
 /* some LK 2.4 HCDs oopsed if we freed or resubmitted urbs from
  * completion callbacks.  2.5 should have fixed those bugs...
  */
 
-static void defer_bh(struct usbnet *dev, struct sk_buff *skb, struct sk_buff_head *list)
+static enum skb_state defer_bh(struct usbnet *dev, struct sk_buff *skb,
+		struct sk_buff_head *list, enum skb_state state)
 {
 	unsigned long		flags;
+	enum skb_state		old_state;
+	struct skb_data *entry = (struct skb_data *) skb->cb;
 
 	spin_lock_irqsave(&list->lock, flags);
+	old_state = entry->state;
+	entry->state = state;
 	__skb_unlink(skb, list);
 	spin_unlock(&list->lock);
 	spin_lock(&dev->done.lock);
@@ -302,6 +317,7 @@ static void defer_bh(struct usbnet *dev, struct sk_buff *skb, struct sk_buff_hea
 	if (dev->done.qlen == 1)
 		tasklet_schedule(&dev->bh);
 	spin_unlock_irqrestore(&dev->done.lock, flags);
+	return old_state;
 }
 
 /* some work can't be done in tasklets, so we use keventd
@@ -343,7 +359,6 @@ static void rx_submit (struct usbnet *dev, struct urb *urb, gfp_t flags)
 	entry = (struct skb_data *) skb->cb;
 	entry->urb = urb;
 	entry->dev = dev;
-	entry->state = rx_start;
 	entry->length = 0;
 
 	usb_fill_bulk_urb (urb, dev->udev, dev->in,
@@ -372,7 +387,7 @@ static void rx_submit (struct usbnet *dev, struct urb *urb, gfp_t flags)
 			tasklet_schedule (&dev->bh);
 			break;
 		case 0:
-			__skb_queue_tail (&dev->rxq, skb);
+			__usbnet_queue_skb(&dev->rxq, skb, rx_start);
 		}
 	} else {
 		if (netif_msg_ifdown (dev))
@@ -415,16 +430,17 @@ static void rx_complete (struct urb *urb)
 	struct skb_data		*entry = (struct skb_data *) skb->cb;
 	struct usbnet		*dev = entry->dev;
 	int			urb_status = urb->status;
+	enum skb_state		state;
 
 	skb_put (skb, urb->actual_length);
-	entry->state = rx_done;
+	state = rx_done;
 	entry->urb = NULL;
 
 	switch (urb_status) {
 	/* success */
 	case 0:
 		if (skb->len < dev->net->hard_header_len) {
-			entry->state = rx_cleanup;
+			state = rx_cleanup;
 			dev->net->stats.rx_errors++;
 			dev->net->stats.rx_length_errors++;
 			if (netif_msg_rx_err (dev))
@@ -463,7 +479,7 @@ static void rx_complete (struct urb *urb)
 				devdbg (dev, "rx throttle %d", urb_status);
 		}
 block:
-		entry->state = rx_cleanup;
+		state = rx_cleanup;
 		entry->urb = urb;
 		urb = NULL;
 		break;
@@ -474,18 +490,19 @@ block:
 		// FALLTHROUGH
 
 	default:
-		entry->state = rx_cleanup;
+		state = rx_cleanup;
 		dev->net->stats.rx_errors++;
 		if (netif_msg_rx_err (dev))
 			devdbg (dev, "rx status %d", urb_status);
 		break;
 	}
 
-	defer_bh(dev, skb, &dev->rxq);
+	state = defer_bh(dev, skb, &dev->rxq, state);
 
 	if (urb) {
-		if (netif_running (dev->net)
-				&& !test_bit (EVENT_RX_HALT, &dev->flags)) {
+		if (netif_running (dev->net) &&
+				!test_bit (EVENT_RX_HALT, &dev->flags) &&
+				state != unlink_start) {
 			rx_submit (dev, urb, GFP_ATOMIC);
 			return;
 		}
@@ -572,16 +589,23 @@ EXPORT_SYMBOL_GPL(usbnet_purge_paused_rxq);
 static int unlink_urbs (struct usbnet *dev, struct sk_buff_head *q)
 {
 	unsigned long		flags;
-	struct sk_buff		*skb, *skbnext;
+	struct sk_buff		*skb;
 	int			count = 0;
 
 	spin_lock_irqsave (&q->lock, flags);
-	skb_queue_walk_safe(q, skb, skbnext) {
+	while (!skb_queue_empty(q)) {
 		struct skb_data		*entry;
 		struct urb		*urb;
 		int			retval;
 
-		entry = (struct skb_data *) skb->cb;
+		skb_queue_walk(q, skb) {
+			entry = (struct skb_data *) skb->cb;
+			if (entry->state != unlink_start)
+				goto found;
+		}
+		break;
+found:
+		entry->state = unlink_start;
 		urb = entry->urb;
 
 		/*
@@ -998,8 +1022,7 @@ static void tx_complete (struct urb *urb)
 		}
 	}
 
-	entry->state = tx_done;
-	defer_bh(dev, skb, &dev->txq);
+	(void) defer_bh(dev, skb, &dev->txq, tx_done);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -1049,7 +1072,6 @@ netdev_tx_t usbnet_start_xmit (struct sk_buff *skb,
 	entry = (struct skb_data *) skb->cb;
 	entry->urb = urb;
 	entry->dev = dev;
-	entry->state = tx_start;
 	entry->length = length;
 
 	usb_fill_bulk_urb (urb, dev->udev, dev->out,
@@ -1080,7 +1102,7 @@ netdev_tx_t usbnet_start_xmit (struct sk_buff *skb,
 		break;
 	case 0:
 		net->trans_start = jiffies;
-		__skb_queue_tail (&dev->txq, skb);
+		__usbnet_queue_skb(&dev->txq, skb, tx_start);
 		if (dev->txq.qlen >= TX_QLEN (dev))
 			netif_stop_queue (net);
 	}
