@@ -300,10 +300,10 @@ struct stmmac_ops {
 			       unsigned int reg_n);
 	void (*get_umac_addr) (void __iomem *ioaddr, unsigned char *addr,
 			       unsigned int reg_n);
-	void (*set_eee_mode) (void __iomem *ioaddr);
-	void (*reset_eee_mode) (void __iomem *ioaddr);
+	void (*set_eee_mode) (void __iomem *ioaddr, u32 lpi_ctrl_status);
+	void (*reset_eee_mode) (void __iomem *ioaddr, u32 lpi_ctrl_status);
 	void (*set_eee_timer) (void __iomem *ioaddr, int ls, int tw);
-	void (*set_eee_pls) (void __iomem *ioaddr, int link);
+	void (*set_eee_pls) (void __iomem *ioaddr, int link, u32 lpi_ctrl_status);
 };
 
 struct mac_link {

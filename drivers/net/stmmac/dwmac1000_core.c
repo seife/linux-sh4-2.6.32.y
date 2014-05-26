@@ -186,7 +186,6 @@ static void dwmac1000_pmt(void __iomem *ioaddr, unsigned long mode)
 	writel(pmt, ioaddr + GMAC_PMT);
 }
 
-
 static int dwmac1000_irq_status(void __iomem *ioaddr)
 {
 	u32 intr_status = readl(ioaddr + GMAC_INT_STATUS);
@@ -241,39 +240,30 @@ static int dwmac1000_irq_status(void __iomem *ioaddr)
 	return status;
 }
 
-static void  dwmac1000_set_eee_mode(void __iomem *ioaddr)
+static void  dwmac1000_set_eee_mode(void __iomem *ioaddr, u32 lpi_ctl_status)
 {
-	u32 value;
-
 	/* Enable the link status receive on RGMII, SGMII ore SMII
 	 * receive path and instruct the transmit to enter in LPI
 	 * state. */
-	value = readl(ioaddr + LPI_CTRL_STATUS);
-	value |= LPI_CTRL_STATUS_LPIEN | LPI_CTRL_STATUS_LPITXA;
-	writel(value, ioaddr + LPI_CTRL_STATUS);
+	lpi_ctl_status |= LPI_CTRL_STATUS_LPIEN | LPI_CTRL_STATUS_LPITXA;
+	writel(lpi_ctl_status, ioaddr + LPI_CTRL_STATUS);
 }
 
-static void  dwmac1000_reset_eee_mode(void __iomem *ioaddr)
+static void  dwmac1000_reset_eee_mode(void __iomem *ioaddr, u32 lpi_ctl_status)
 {
-	u32 value;
-
-	value = readl(ioaddr + LPI_CTRL_STATUS);
-	value &= ~(LPI_CTRL_STATUS_LPIEN | LPI_CTRL_STATUS_LPITXA);
-	writel(value, ioaddr + LPI_CTRL_STATUS);
+	lpi_ctl_status &= ~(LPI_CTRL_STATUS_LPIEN | LPI_CTRL_STATUS_LPITXA);
+	writel(lpi_ctl_status, ioaddr + LPI_CTRL_STATUS);
 }
 
-static void  dwmac1000_set_eee_pls(void __iomem *ioaddr, int link)
+static void  dwmac1000_set_eee_pls(void __iomem *ioaddr, int link,
+		u32 lpi_ctl_status)
 {
-	u32 value;
-
-	value = readl(ioaddr + LPI_CTRL_STATUS);
-
 	if (link)
-		value |= LPI_CTRL_STATUS_PLS;
+		lpi_ctl_status |= LPI_CTRL_STATUS_PLS;
 	else
-		value &= ~LPI_CTRL_STATUS_PLS;
+		lpi_ctl_status &= ~LPI_CTRL_STATUS_PLS;
 
-	writel(value, ioaddr + LPI_CTRL_STATUS);
+	writel(lpi_ctl_status, ioaddr + LPI_CTRL_STATUS);
 }
 
 static void  dwmac1000_set_eee_timer(void __iomem *ioaddr, int ls, int tw)

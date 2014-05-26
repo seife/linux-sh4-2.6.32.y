@@ -211,13 +211,13 @@ static void stmmac_enable_eee_mode(struct stmmac_priv *priv)
 	/* Check and enter in LPI mode */
 	if ((priv->dirty_tx == priv->cur_tx) &&
 	    (priv->tx_path_in_lpi_mode == false))
-		priv->hw->mac->set_eee_mode(priv->ioaddr);
+		priv->hw->mac->set_eee_mode(priv->ioaddr, priv->lpi_ctl_status);
 }
 
 void stmmac_disable_eee_mode(struct stmmac_priv *priv)
 {
 	/* Exit and disable EEE in case of we are are in LPI state. */
-	priv->hw->mac->reset_eee_mode(priv->ioaddr);
+	priv->hw->mac->reset_eee_mode(priv->ioaddr, priv->lpi_ctl_status);
 	del_timer_sync(&priv->eee_ctrl_timer);
 	priv->tx_path_in_lpi_mode = false;
 }
@@ -279,7 +279,8 @@ static void stmmac_eee_adjust(struct stmmac_priv *priv)
 	 * modify the PLS bit in the LPI ctrl & status reg according
 	 * to the PHY link status. For this reason. */
 	if (priv->eee_enabled)
-		priv->hw->mac->set_eee_pls(priv->ioaddr, priv->phydev->link);
+		priv->hw->mac->set_eee_pls(priv->ioaddr, priv->phydev->link,
+				priv->lpi_ctl_status);
 }
 
 /**
