@@ -13,6 +13,7 @@
 #include <linux/ethtool.h>
 #include <linux/dma-mapping.h>
 #include <linux/phy.h>
+#include <linux/mdio.h>
 #include <linux/stm/miphy.h>
 #include <linux/stm/device.h>
 #include <linux/clk.h>
@@ -30,6 +31,25 @@ static u64 stxh205_dma_mask = DMA_BIT_MASK(32);
 /* --------------------------------------------------------------------
  *           Ethernet MAC resources (PAD and Retiming)
  * --------------------------------------------------------------------*/
+
+#define ICPLUS_PHY_ID	0x02430c54
+#define ICPLUS_PHY_MASK	0x0ffffff0
+
+static int icplus_phy_fixup(struct phy_device *phydev)
+{
+	dev_info(&phydev->dev, "IC+101G: disable EEE advertise\n");
+
+	/*
+	 * Read paged register to access and disable the EEE advertise at phy
+	 * level.
+	 */
+	phy_write(phydev, 13, 7);	/* MMD DEVAD 7. */
+	phy_write(phydev, 14, MDIO_EEE_ADV);	/* MMD DEVAD 7. */
+	phy_write(phydev, 13, 0x4007);	/* MMD Data command for MMD DEVAD 7. */
+	phy_write(phydev, 14, 0); /* reset MMD_100BASETXEEE */
+
+	return 0;
+}
 
 #define DATA_IN(_port, _pin, _func, _retiming) \
 	{ \
@@ -293,6 +313,9 @@ void __init stxh205_configure_ethernet(struct stxh205_ethernet_config *config)
 	struct clk *clk;
 
 	BUG_ON(configured++);
+
+	phy_register_fixup_for_uid(ICPLUS_PHY_ID, ICPLUS_PHY_MASK,
+				   icplus_phy_fixup);
 
 	if (!config)
 		config = &default_config;
