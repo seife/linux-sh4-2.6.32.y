@@ -162,6 +162,7 @@ struct stm_spi_fsm {
 /* MX25 Commands */
 /*	- Read Security Register (home of '4BYTE' status bit!) */
 #define MX25_CMD_RDSCUR		0x2B
+#define MX25_CMD_WRITE_1_4_4	0x38
 
 /* S25FLxxxS commands */
 /*	- WRITE/ERASE 32-bit address commands */
@@ -968,7 +969,8 @@ static int fsm_config_rwe_seqs_default(struct stm_spi_fsm *fsm,
 	if (fsm_search_configure_rw_seq(fsm, &fsm_seq_read,
 					default_read_configs,
 					info->capabilities) != 0) {
-		dev_err(fsm->dev, "failed to configure READ sequence according to capabilities [0x%08x]\n",
+		dev_err(fsm->dev,
+			"failed to configure READ sequence according to capabilities [0x%08x]\n",
 			info->capabilities);
 		return 1;
 	}
@@ -977,7 +979,8 @@ static int fsm_config_rwe_seqs_default(struct stm_spi_fsm *fsm,
 	if (fsm_search_configure_rw_seq(fsm, &fsm_seq_write,
 					default_write_configs,
 					info->capabilities) != 0) {
-		dev_err(fsm->dev, "failed to configure WRITE sequence according to capabilities [0x%08x]\n",
+		dev_err(fsm->dev,
+			"failed to configure WRITE sequence according to capabilities [0x%08x]\n",
 			info->capabilities);
 		return 1;
 	}
@@ -1562,6 +1565,15 @@ static int s25fl_config(struct stm_spi_fsm *fsm, struct flash_info *info)
 /* [MX25xxx] Configure READ/Write sequences */
 #define MX25_STATUS_QE			(0x1 << 6)
 
+/* mx25 WRITE configurations, in order of preference */
+static struct seq_rw_config mx25_write_configs[] = {
+	{FLASH_CAPS_WRITE_1_4_4, MX25_CMD_WRITE_1_4_4,  1, 4, 4, 0x00, 0, 0},
+	{FLASH_CAPS_READ_WRITE,  FLASH_CMD_WRITE,       1, 1, 1, 0x00, 0, 0},
+
+	/* terminating entry */
+	{0x00,			  0,			 0, 0, 0, 0x00, 0, 0},
+};
+
 static int mx25_configure_en32bitaddr_seq(struct fsm_seq *seq)
 {
 	seq->seq_opc[0] = (SEQ_OPC_PADS_1 |
@@ -1586,12 +1598,29 @@ static int mx25_config(struct stm_spi_fsm *fsm, struct flash_info *info)
 {
 	uint32_t data_pads;
 	uint8_t sta;
+	uint32_t capabilities = info->capabilities;
 
-	/*
-	 * Use default READ/WRITE sequences
-	 */
-	if (fsm_config_rwe_seqs_default(fsm, info) != 0)
+	/* Configure 'READ' sequence */
+	if (fsm_search_configure_rw_seq(fsm, &fsm_seq_read,
+					default_read_configs,
+					capabilities) != 0) {
+		dev_err(fsm->dev, "failed to configure READ sequence according to capabilities [0x%08x]\n",
+			capabilities);
 		return 1;
+	}
+
+	/* Configure 'WRITE' sequence */
+	if (fsm_search_configure_rw_seq(fsm, &fsm_seq_write,
+					mx25_write_configs,
+					capabilities) != 0) {
+		dev_err(fsm->dev, "failed to configure WRITE sequence according to capabilities [0x%08x]\n",
+			capabilities);
+		return 1;
+	}
+
+	/* Configure 'ERASE_SECTOR' sequence */
+	configure_erasesec_seq(&fsm_seq_erase_sector,
+			       capabilities & FLASH_CAPS_32BITADDR);
 
 	/*
 	 * Configure 32-bit Address Support
