@@ -1195,6 +1195,7 @@ static void dump_bpx_region(struct stm_spi_fsm *fsm, uint8_t bpx)
 		fsm->bpx_tbprot ? fsm->bpx_bnds[bpx] : fsm->mtd.size);
 }
 
+#ifdef CONFIG_STM_SPI_FSM_DEBUG
 /* Print the lockable regions supported by the BPx scheme */
 static void dump_bpx_regions(struct stm_spi_fsm *fsm)
 {
@@ -1206,6 +1207,7 @@ static void dump_bpx_regions(struct stm_spi_fsm *fsm)
 	for (i = 0; i < fsm->bpx_n_bnds; i++)
 		dump_bpx_region(fsm, i);
 }
+#endif
 
 /* Extract BPx from the value of the status register */
 static uint8_t status_to_bpx(struct stm_spi_fsm *fsm, uint8_t status)
@@ -3337,12 +3339,17 @@ static int __init stm_spi_fsm_probe(struct platform_device *pdev)
 		/* - Individual Block Locking scheme */
 		fsm->mtd.lock = fsm_mtd_lock;
 		fsm->mtd.unlock = fsm_mtd_unlock;
+
+		dev_info(fsm->dev, "Individual block locking scheme enabled\n");
 	} else if (info->capabilities & FLASH_CAPS_BPX_LOCKING) {
 		/* - PBx Block Protection Scheme */
 		fsm->mtd.lock = fsm_mtd_bpx_lock;
 		fsm->mtd.unlock = fsm_mtd_bpx_unlock;
 
+		dev_info(fsm->dev, "BPx block locking scheme enabled\n");
+#ifdef CONFIG_STM_SPI_FSM_DEBUG
 		dump_bpx_regions(fsm);
+#endif
 		fsm_dump_bpx_state(fsm);
 	}
 
