@@ -572,6 +572,16 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 static int fuse_copy_do(struct fuse_copy_state *cs, void **val, unsigned *size)
 {
 	unsigned ncpy = min(*size, cs->len);
+
+#ifdef CONFIG_CPU_SH4
+	/*
+	 * We flush the cache to avoid spare fuse lockups and crashes.
+	 * At the beginning it was only a proposed patch for mips (operwrt
+	 * project) now reworked for superh sh4.
+	 */
+	flush_cache_all();
+#endif
+
 	if (val) {
 		if (cs->write)
 			memcpy(cs->buf, *val, ncpy);
