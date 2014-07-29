@@ -636,16 +636,8 @@ static struct platform_device stxh205_pcie_mp_device = {
  * to map PCIe, instead of eSATA, on PHY Lane */
 void __init stxh205_configure_miphy(struct stxh205_miphy_config *config)
 {
-	struct sysconf_field *sel_sata;
-
 	if (config->iface != UPORT_IF) {
 		printk(KERN_ERR "MiPhy only supported in microport mode\n");
-		return;
-	}
-
-	sel_sata = sysconf_claim(SYSCONF(445), 1, 1, "sata/pcie");
-	if (!sel_sata) {
-		printk(KERN_ERR "Cannot claim SELECT_SATA sysconf\n");
 		return;
 	}
 
@@ -653,11 +645,15 @@ void __init stxh205_configure_miphy(struct stxh205_miphy_config *config)
 	stxh205_pcie_mp_platform_data.rx_pol_inv = config->rx_pol_inv;
 	stxh205_pcie_mp_platform_data.tx_pol_inv = config->tx_pol_inv;
 
-	/* Select either PCIE or SATA mode */
-	sysconf_write(sel_sata, config->mode == SATA_MODE);
-
 	if (config->mode == PCIE_MODE) {
 		struct sysconf_field *miphy_reset, *pcie_reset, *pcie_clk_sel;
+		struct sysconf_field *sel_pcie =
+			sysconf_claim(SYSCONF(445), 1, 1, "sata/pcie");
+		if (!sel_pcie) {
+			printk(KERN_ERR "Cannot claim SELECT_SATA sysconf\n");
+			return;
+		}
+		sysconf_write(sel_pcie, 0);
 
 		/* Change addresses to other port */
 		stxh205_pcie_mp_device.resource[0].start = PCIE_UPORT_BASE,
@@ -679,37 +675,30 @@ void __init stxh205_configure_miphy(struct stxh205_miphy_config *config)
 }
 
 
-static int stxh205_ahci_init(struct device *dev, void __iomem *mmio)
-{
-#define SATA_OOBR       0xbc
-	writel(0x80000000, mmio + SATA_OOBR);
-	writel(0x8204080C, mmio + SATA_OOBR);
-	writel(0x0204080C, mmio + SATA_OOBR);
-	if (!stm_miphy_claim(0, SATA_MODE, dev)) {
-		dev_err(dev, "Cannot claim MiPHY 0!\n");
-		return -ENODEV;
-	}
-	return 0;
-}
-
-static struct ahci_platform_data stxh205_ahci_pdata = {
-	.init = stxh205_ahci_init,
-};
-
 static u64 stxh205_ahci_dmamask = DMA_BIT_MASK(32);
 
 struct platform_device stxh205_sata_device = {
-	.name           = "ahci",
-	.id             = -1,
+	.name           = "ahci_stm",
+	.id             = 0,
 	.resource = (struct resource[]) {
 		STM_PLAT_RESOURCE_MEM_NAMED("ahci", 0xFD548000, 0x1000),
 		STM_PLAT_RESOURCE_IRQ_NAMED("ahci", ILC_IRQ(58), -1),
 	},
 	.num_resources  = 2,
 	.dev            = {
-		.platform_data          = &stxh205_ahci_pdata,
 		.dma_mask               = &stxh205_ahci_dmamask,
 		.coherent_dma_mask      = DMA_BIT_MASK(32),
+		.platform_data		= &(struct stm_plat_ahci_data) {
+			.device_config = &(struct stm_device_config){
+			.pad_config = &(struct stm_pad_config) {
+				.sysconfs_num = 1,
+				.sysconfs = (struct stm_pad_sysconf []) {
+					/* MyPhy in Sata mode */
+					STM_PAD_SYSCONF(SYSCONF(445), 1, 1, 1),
+					},
+				},
+			},
+		},
 	},
 };
 

@@ -44,7 +44,7 @@ int __init plat_clk_alias_init(void)
 	clk_add_alias("stmmac_phy_clk", NULL, "CLK_A1_ETH_PHY", NULL);
 
 	/* Sata/PCIe clocks */
-	clk_add_alias("sata_clk", NULL, "CLK_A0_IC_REG_LP_OFF", NULL);
+	clk_add_alias("ahci_clk", NULL, "CLK_A0_IC_REG_LP_OFF", NULL);
 	clk_add_alias("pcie_clk", NULL, "CLK_A0_IC_REG_LP_OFF", NULL);
 
 	/* LPC */

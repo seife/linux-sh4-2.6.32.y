@@ -26,7 +26,7 @@
 static int __init ahci_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct ahci_platform_data *pdata = dev->platform_data;
+	struct ahci_platform_data *pdata = dev_get_platdata(dev);
 	struct ata_port_info pi = {
 		.flags		= AHCI_FLAG_COMMON,
 		.pio_mask	= ATA_PIO4,
@@ -125,9 +125,6 @@ static int __init ahci_probe(struct platform_device *pdev)
 		ata_port_desc(ap, "mmio %pR", mem);
 		ata_port_desc(ap, "port 0x%x", 0x100 + ap->port_no * 0x80);
 
-		/* set initial link pm policy */
-		ap->pm_policy = NOT_AVAILABLE;
-
 		/* set enclosure management message type */
 		if (ap->flags & ATA_FLAG_EM)
 			ap->em_message_type = hpriv->em_msg_type;
@@ -159,7 +156,7 @@ err0:
 static int __devexit ahci_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct ahci_platform_data *pdata = dev->platform_data;
+	struct ahci_platform_data *pdata = dev_get_platdata(dev);
 	struct ata_host *host = dev_get_drvdata(dev);
 
 	ata_host_detach(host);
@@ -170,18 +167,117 @@ static int __devexit ahci_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_PM
+static int __ahci_suspend(struct device *dev, struct pm_message pm)
+{
+	struct ata_host *host = dev_get_drvdata(dev);
+	struct ahci_host_priv *hpriv = host->private_data;
+	void __iomem *mmio = hpriv->mmio;
+	u32 ctl;
+	int rc;
+
+	if (hpriv->flags & AHCI_HFLAG_NO_SUSPEND) {
+		dev_err(dev, "firmware update required for suspend/resume\n");
+		return -EIO;
+	}
+
+	/*
+	 * AHCI spec rev1.1 section 8.3.3:
+	 * Software must disable interrupts prior to requesting a
+	 * transition of the HBA to D3 state.
+	 */
+	ctl = readl(mmio + HOST_CTL);
+	ctl &= ~HOST_IRQ_EN;
+	writel(ctl, mmio + HOST_CTL);
+	readl(mmio + HOST_CTL); /* flush */
+
+	rc = ata_host_suspend(host, pm);
+	if (rc)
+		return rc;
+
+	return 0;
+}
+
+static int ahci_suspend(struct device *dev)
+{
+	return __ahci_suspend(dev, PMSG_SUSPEND);
+}
+
+static int ahci_resume(struct device *dev)
+{
+	struct ata_host *host = dev_get_drvdata(dev);
+	int rc;
+
+	if (dev->power.power_state.event == PM_EVENT_SUSPEND) {
+		rc = ahci_reset_controller(host);
+		if (rc)
+			return rc;
+
+		ahci_init_controller(host);
+	}
+
+	ata_host_resume(host);
+
+	return 0;
+}
+
+#ifdef CONFIG_HIBERNATION
+static int ahci_freeze(struct device *dev)
+{
+	return __ahci_suspend(dev, PMSG_HIBERNATE);
+}
+
+static int ahci_restore(struct device *dev)
+{
+	struct ahci_platform_data *pdata = dev_get_platdata(dev);
+	struct ata_host *host = dev_get_drvdata(dev);
+	struct ahci_host_priv *hpriv = host->private_data;
+	int rc;
+
+	if (pdata && pdata->init) {
+		rc = pdata->init(dev, hpriv->mmio);
+		if (rc)
+			return rc;
+	}
+
+	rc = ahci_reset_controller(host);
+	if (rc)
+		return rc;
+	ahci_init_controller(host);
+
+	ata_host_resume(host);
+
+	return 0;
+}
+#else
+#define ahci_freeze		NULL
+#define	ahci_resume		NULL
+#endif
+
+static struct dev_pm_ops ahci_pm_ops = {
+	.suspend		= &ahci_suspend,
+	.resume			= &ahci_resume,
+	.freeze			= &ahci_freeze,
+	.thaw			= &ahci_restore,
+	.restore		= &ahci_restore,
+};
+#endif
+
 static struct platform_driver ahci_driver = {
-	.probe = ahci_probe,
 	.remove = __devexit_p(ahci_remove),
+	.probe = ahci_probe,
 	.driver = {
 		.name = "ahci",
 		.owner = THIS_MODULE,
+#ifdef CONFIG_PM
+		.pm = &ahci_pm_ops,
+#endif
 	},
 };
 
 static int __init ahci_init(void)
 {
-	return platform_driver_probe(&ahci_driver, ahci_probe);
+	return platform_driver_register(&ahci_driver);
 }
 module_init(ahci_init);
 
