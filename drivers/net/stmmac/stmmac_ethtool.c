@@ -527,6 +527,21 @@ static int ethtool_op_set_eee(struct net_device *dev, struct ethtool_value *eee)
 	return 0;
 }
 
+static int stmmac_ethtool_begin(struct net_device *netdev)
+{
+	struct stmmac_priv *priv = netdev_priv(netdev);
+
+	pm_runtime_get_sync(priv->device);
+	return 0;
+}
+
+static void stmmac_ethtool_complete(struct net_device *netdev)
+{
+	struct stmmac_priv *priv = netdev_priv(netdev);
+
+	pm_runtime_put(priv->device);
+}
+
 static struct ethtool_ops stmmac_ethtool_ops = {
 	.begin = stmmac_check_if_running,
 	.get_drvinfo = stmmac_ethtool_getdrvinfo,
@@ -553,6 +568,8 @@ static struct ethtool_ops stmmac_ethtool_ops = {
 	.set_tso = ethtool_op_set_tso,
 	.get_eee = ethtool_op_get_eee,
 	.set_eee = ethtool_op_set_eee,
+	.begin = stmmac_ethtool_begin,
+	.complete = stmmac_ethtool_complete,
 };
 
 void stmmac_set_ethtool_ops(struct net_device *netdev)

@@ -987,21 +987,15 @@ static void stmmac_check_ether_addr(struct stmmac_priv *priv)
 						   priv->dev->dev_addr);
 }
 
-/**
- *  stmmac_open - open entry point of the driver
- *  @dev : pointer to the device structure.
- *  Description:
- *  This function is the open entry point of the driver.
- *  Return value:
- *  0 on success and an appropriate (-)ve integer as defined in errno.h
- *  file on failure.
- */
-static int stmmac_open(struct net_device *dev)
+static int _stmmac_open(struct net_device *dev, bool resuming)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
 	int ret;
 
 	stmmac_check_ether_addr(priv);
+
+	if (!resuming)
+		pm_runtime_get_sync(priv->device);
 
 	/* MDIO bus Registration */
 
@@ -1123,6 +1117,9 @@ static int stmmac_open(struct net_device *dev)
 
 	priv->eee_enabled = stmmac_eee_init(priv);
 
+	if (!resuming)
+		pm_runtime_put(priv->device);
+
 	napi_enable(&priv->napi);
 	skb_queue_head_init(&priv->rx_recycle);
 	netif_start_queue(dev);
@@ -1143,18 +1140,32 @@ open_error:
 	if (priv->phydev)
 		phy_disconnect(priv->phydev);
 
+	if (!resuming)
+		pm_runtime_put(priv->device);
+
 	return ret;
 }
 
 /**
- *  stmmac_release - close entry point of the driver
- *  @dev : device pointer.
+ *  stmmac_open - open entry point of the driver
+ *  @dev : pointer to the device structure.
  *  Description:
- *  This is the stop entry point of the driver.
+ *  This function is the open entry point of the driver.
+ *  Return value:
+ *  0 on success and an appropriate (-)ve integer as defined in errno.h
+ *  file on failure.
  */
-static int stmmac_release(struct net_device *dev)
+static int stmmac_open(struct net_device *dev)
+{
+	return _stmmac_open(dev, false);
+}
+
+static int _stmmac_release(struct net_device *dev, bool suspending)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
+
+	if (!suspending)
+		pm_runtime_get_sync(priv->device);
 
 	if (priv->eee_enabled)
 		del_timer_sync(&priv->eee_ctrl_timer);
@@ -1199,7 +1210,21 @@ static int stmmac_release(struct net_device *dev)
 #ifdef CONFIG_STMMAC_DEBUG_FS
 	stmmac_exit_fs();
 #endif
+	if (!suspending)
+		pm_runtime_put_sync(priv->device);
+
 	return 0;
+}
+
+/**
+ *  stmmac_release - close entry point of the driver
+ *  @dev : device pointer.
+ *  Description:
+ *  This is the stop entry point of the driver.
+ */
+static int stmmac_release(struct net_device *dev)
+{
+	return 	_stmmac_release(dev, false);
 }
 
 /*
@@ -2199,7 +2224,7 @@ int stmmac_freeze(struct net_device *ndev)
 	if (!ndev || !netif_running(ndev))
 		return 0;
 
-	return stmmac_release(ndev);
+	return _stmmac_release(ndev, true);
 }
 
 int stmmac_restore(struct net_device *ndev)
@@ -2207,7 +2232,7 @@ int stmmac_restore(struct net_device *ndev)
 	if (!ndev || !netif_running(ndev))
 		return 0;
 
-	return stmmac_open(ndev);
+	return _stmmac_open(ndev, true);
 }
 #endif /* CONFIG_PM */
 

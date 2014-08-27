@@ -98,6 +98,11 @@ static int stmmac_pltfr_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, priv->dev);
 
+	pm_runtime_set_active(&pdev->dev);
+	pm_suspend_ignore_children(&pdev->dev, 1);
+	pm_runtime_put_noidle(&pdev->dev);
+	pm_runtime_enable(&pdev->dev);
+
 	pr_debug("STMMAC platform driver registration completed");
 
 	return 0;
@@ -124,6 +129,10 @@ static int stmmac_pltfr_remove(struct platform_device *pdev)
 	struct stmmac_priv *priv = netdev_priv(ndev);
 	struct resource *res;
 	int ret = stmmac_dvr_remove(ndev);
+
+	pm_runtime_get_noresume(&pdev->dev);
+	pm_runtime_put(&pdev->dev);
+	pm_runtime_disable(&pdev->dev);
 
 	if (priv->plat->exit)
 		priv->plat->exit(pdev);
@@ -169,12 +178,23 @@ int stmmac_pltfr_restore(struct device *dev)
 	return stmmac_restore(ndev);
 }
 
+int stmmac_pltfr_idle(struct device *dev)
+{
+	struct net_device *ndev = dev_get_drvdata(dev);
+	struct stmmac_priv *priv = netdev_priv(ndev);
+	struct phy_device *phydev = priv->phydev;
+
+#ifdef CONFIG_PM_RUNTIME
+	if (!phydev->link)
+		pm_schedule_suspend(dev, MSEC_PER_SEC * 5);
+#endif
+	return -EBUSY;
+}
+
 static const struct dev_pm_ops stmmac_pltfr_pm_ops = {
-	.suspend = stmmac_pltfr_suspend,
-	.resume = stmmac_pltfr_resume,
-	.freeze = stmmac_pltfr_freeze,
-	.thaw = stmmac_pltfr_restore,
-	.restore = stmmac_pltfr_restore,
+	SET_SYSTEM_SLEEP_PM_OPS(stmmac_pltfr_suspend, stmmac_pltfr_resume)
+	SET_RUNTIME_PM_OPS(stmmac_pltfr_suspend, stmmac_pltfr_resume,
+			   stmmac_pltfr_idle)
 };
 #else
 static const struct dev_pm_ops stmmac_pltfr_pm_ops;
