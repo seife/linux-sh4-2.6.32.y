@@ -1050,11 +1050,6 @@ static void iic_stm_setup_timing(struct iic_ssc *adap)
 	ssc_store32(adap, SSC_STOP_SETUP, iic_stop_setup);
 	ssc_store32(adap, SSC_BUS_FREE, iic_bus_free);
 
-	/*
-	 * Set Slave Address to allow 'General Call'
-	 */
-	ssc_store32(adap, SSC_SLAD, 0x7f);
-
 #ifdef CONFIG_I2C_STM_HW_GLITCH
 	/* Apply I2C settings for glitch filter as suggested by Validation team
 	   Refer to Bugzilla 14906 */
